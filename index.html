@@ -322,7 +322,7 @@
 
     function playNoteOn(output, noteNumber, duration = 10000) {
       // Canal 0, velocidad 0x40 (64 decimal) → más suave que 0x7f
-      output.send([0x90, noteNumber, 0x50]);
+      output.send([0x90, noteNumber, 0x60]);
       setTimeout(() => {
         output.send([0x80, noteNumber, 0x00]);
       }, duration);
