@@ -226,28 +226,44 @@
     }
 
     function populateMIDIDevices() {
-      // Limpiar selects
-      outputSelect.innerHTML = '<option value="">(ninguna)</option>';
-      inputSelect.innerHTML  = '<option value="">(ninguna)</option>';
+  const currentOutputId = outputSelect.value;
+  const currentInputId = inputSelect.value;
 
-      // Rellenar salidas
-      for (let output of midiAccess.outputs.values()) {
-        const option = document.createElement('option');
-        option.value = output.id;
-        option.textContent = output.name;
-        outputSelect.appendChild(option);
-      }
+  outputSelect.innerHTML = '<option value="">(ninguna)</option>';
+  inputSelect.innerHTML = '<option value="">(ninguna)</option>';
 
-      // Rellenar entradas
-      for (let input of midiAccess.inputs.values()) {
-        const option = document.createElement('option');
-        option.value = input.id;
-        option.textContent = input.name;
-        inputSelect.appendChild(option);
-      }
+  for (let output of midiAccess.outputs.values()) {
+    const option = document.createElement('option');
+    option.value = output.id;
+    option.textContent = output.name;
+    if (output.id === currentOutputId) option.selected = true;
+    outputSelect.appendChild(option);
+  }
 
-      checkReadyState();
+  for (let input of midiAccess.inputs.values()) {
+    const option = document.createElement('option');
+    option.value = input.id;
+    option.textContent = input.name;
+    if (input.id === currentInputId) option.selected = true;
+    inputSelect.appendChild(option);
+  }
+
+  // Restaurar objetos según selección, por si los <select> fueron reconstruidos
+  if (currentOutputId && midiAccess.outputs.has(currentOutputId)) {
+    selectedOutput = midiAccess.outputs.get(currentOutputId);
+  }
+
+  if (currentInputId && midiAccess.inputs.has(currentInputId)) {
+    if (midiInputListener && selectedInput) {
+      selectedInput.removeEventListener('midimessage', midiInputListener);
     }
+    selectedInput = midiAccess.inputs.get(currentInputId);
+    midiInputListener = handleMIDIMessage;
+    selectedInput.addEventListener('midimessage', midiInputListener);
+  }
+
+  checkReadyState();
+}
 
     function checkReadyState() {
       startButton.disabled = !(selectedInput && selectedOutput);
