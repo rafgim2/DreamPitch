@@ -300,12 +300,24 @@
 
     startButton.addEventListener('click', () => {
       // 1) Pedir nombre del jugador
-      playerName = prompt("Ingrese su nombre:");
-      if (!playerName || playerName.trim().length === 0) {
-        alert("Debes ingresar un nombre para jugar.");
-        return;
+      let nombreOk = false;
+      while (!nombreOk) {
+        playerName = prompt("Ingrese su nombre (máx. 10 caracteres):");
+        if (playerName === null) {
+          // El usuario canceló el prompt
+          return;
+        }
+        playerName = playerName.trim();
+        if (playerName.length === 0) {
+          alert("Debes ingresar un nombre para jugar.");
+        } else {
+          if (playerName.length > 10) {
+            alert("El nombre excede 10 caracteres. Se truncará a 10.");
+            playerName = playerName.substring(0, 10);
+          }
+          nombreOk = true;
+        }
       }
-      playerName = playerName.trim();
 
       // 2) Iniciar juego
       resetGame();
@@ -424,83 +436,94 @@
 
       feedbackDiv.innerHTML = `
         Juego terminado. Tu puntuación: <strong>${finalScoreRounded}</strong><br>
-             `;
+      `;
 
-      // 3) Guardar en Firestore: solo name, errores, avgTime y score
-      let docRef;
+      // 3) Guardar en Firestore: machacar si existe el nombre
       try {
-        docRef = await db.collection('scores').add({
-          name: playerName,
-          errors: errorCount,
-          avgTime: Number(avgTime.toFixed(3)),
-          score: finalScoreRounded,
-          timestamp: firebase.firestore.FieldValue.serverTimestamp()
-        });
-      } catch (err) {
-        console.error("Error guardando en Firestore:", err);
-        alert("Hubo un error guardando tu puntuación. Revisa la consola.");
-        startButton.disabled = false;
-        return;
-      }
-
-      // 4) Leer TODOS los documentos ordenados SOLO POR score desc
-      let allDocs;
-      try {
+        // 3.1) Buscar si ya existe un documento con este nombre
         const querySnap = await db.collection('scores')
+          .where('name', '==', playerName)
+          .get();
+
+        let docRef;
+        if (!querySnap.empty) {
+          // Si ya hay un documento, tomar el primero y actualizarlo
+          const existingDoc = querySnap.docs[0];
+          docRef = existingDoc.ref;
+          await docRef.update({
+            errors: errorCount,
+            avgTime: Number(avgTime.toFixed(3)),
+            score: finalScoreRounded,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        } else {
+          // Si no existe, crear uno nuevo
+          const addedDoc = await db.collection('scores').add({
+            name: playerName,
+            errors: errorCount,
+            avgTime: Number(avgTime.toFixed(3)),
+            score: finalScoreRounded,
+            timestamp: firebase.firestore.FieldValue.serverTimestamp()
+          });
+          docRef = addedDoc;
+        }
+
+        // 4) Leer TODOS los documentos ordenados SOLO POR score desc
+        const allSnap = await db.collection('scores')
           .orderBy('score', 'desc')
           .get();
-        allDocs = querySnap.docs.map(doc => {
+        const allDocs = allSnap.docs.map(doc => {
           return {
             id: doc.id,
             name: doc.data().name,
             score: doc.data().score
           };
         });
-      } catch (err) {
-        console.error("Error leyendo leaderboard:", err);
-        alert("Hubo un error cargando la clasificación. Revisa la consola.");
+
+        // 5) Encontrar índice del jugador actual
+        const idxCurrent = allDocs.findIndex(d => d.id === docRef.id);
+
+        // Construir un rango centrado en idxCurrent (aprox. 10 filas)
+        const VENTANA = 4; // 4 arriba + current + 5 abajo ≈ 10 filas
+        let startIdx = Math.max(0, idxCurrent - VENTANA);
+        let endIdx = Math.min(allDocs.length, idxCurrent + VENTANA + 1);
+
+        // Ajustar si cerca del final o del principio
+        if (endIdx - startIdx < (2 * VENTANA + 1)) {
+          if (startIdx === 0) {
+            endIdx = Math.min(allDocs.length, (2 * VENTANA + 1));
+          } else if (endIdx === allDocs.length) {
+            startIdx = Math.max(0, allDocs.length - (2 * VENTANA + 1));
+          }
+        }
+
+        const sliceDocs = allDocs.slice(startIdx, endIdx);
+
+        // 6) Mostrar la tabla (solo Pos, Jugador y Puntuación)
+        leaderboardBody.innerHTML = "";
+        sliceDocs.forEach((entry, i) => {
+          const globalRank = startIdx + i + 1; // posición global (1-based)
+          const tr = document.createElement('tr');
+          if (entry.id === docRef.id) {
+            tr.classList.add('current-player');
+          }
+          tr.innerHTML = `
+            <td>${globalRank}</td>
+            <td>${entry.name}</td>
+            <td>${entry.score.toFixed(3)}</td>
+          `;
+          leaderboardBody.appendChild(tr);
+        });
+        leaderboardContainer.style.display = 'block';
+
+        // 7) Permitir volver a jugar
         startButton.disabled = false;
-        return;
+
+      } catch (err) {
+        console.error("Error guardando o cargando la clasificación:", err);
+        alert("Hubo un error procesando tu puntuación. Revisa la consola.");
+        startButton.disabled = false;
       }
-
-      // 5) Encontrar índice del jugador actual
-      const idxCurrent = allDocs.findIndex(d => d.id === docRef.id);
-
-      // Construir un rango centrado en idxCurrent (aprox. 10 filas)
-      const VENTANA = 4; // 4 arriba + current + 5 abajo ≈ 10 filas
-      let startIdx = Math.max(0, idxCurrent - VENTANA);
-      let endIdx = Math.min(allDocs.length, idxCurrent + VENTANA + 1);
-
-      // Ajustar si cerca del final o del principio
-      if (endIdx - startIdx < (2 * VENTANA + 1)) {
-        if (startIdx === 0) {
-          endIdx = Math.min(allDocs.length, (2 * VENTANA + 1));
-        } else if (endIdx === allDocs.length) {
-          startIdx = Math.max(0, allDocs.length - (2 * VENTANA + 1));
-        }
-      }
-
-      const sliceDocs = allDocs.slice(startIdx, endIdx);
-
-      // 6) Mostrar la tabla (solo Pos, Jugador y Puntuación)
-      leaderboardBody.innerHTML = "";
-      sliceDocs.forEach((entry, i) => {
-        const globalRank = startIdx + i + 1; // posición global (1-based)
-        const tr = document.createElement('tr');
-        if (entry.id === docRef.id) {
-          tr.classList.add('current-player');
-        }
-        tr.innerHTML = `
-          <td>${globalRank}</td>
-          <td>${entry.name}</td>
-          <td>${entry.score.toFixed(3)}</td>
-        `;
-        leaderboardBody.appendChild(tr);
-      });
-      leaderboardContainer.style.display = 'block';
-
-      // 7) Permitir volver a jugar
-      startButton.disabled = false;
     }
   </script>
 </body>
