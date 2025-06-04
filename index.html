@@ -52,7 +52,7 @@
     .feedback {
       font-size: 1.5rem;
       font-weight: bold;
-      height: 2em;
+      height: 3em;
       margin-top: 15px;
     }
     .feedback.correcto {
@@ -121,7 +121,7 @@
     <div class="status">
       <span>Notas restantes: <span id="notes-remaining">10</span></span>
       <span>Errores: <span id="error-count">0</span></span>
-      <span>Tiempo: <span id="time-display">0.00</span> s</span>
+      <span>Tiempo: <span id="time-display">0.000</span> s</span>
     </div>
 
     <div class="feedback" id="feedback"></div>
@@ -154,7 +154,6 @@
     /*********************************************
      * 1) Configuración de Firebase (Firestore)  *
      *********************************************/
-    // Valores que me proporcionaste:
     const firebaseConfig = {
       apiKey: "AIzaSyD5EAMg-0p54f8bPq8SVdZ_ePg5Xso3cmg",
       authDomain: "arm1-acbba.firebaseapp.com",
@@ -227,44 +226,44 @@
     }
 
     function populateMIDIDevices() {
-  const currentOutputId = outputSelect.value;
-  const currentInputId = inputSelect.value;
+      const currentOutputId = outputSelect.value;
+      const currentInputId = inputSelect.value;
 
-  outputSelect.innerHTML = '<option value="">(ninguna)</option>';
-  inputSelect.innerHTML = '<option value="">(ninguna)</option>';
+      outputSelect.innerHTML = '<option value="">(ninguna)</option>';
+      inputSelect.innerHTML  = '<option value="">(ninguna)</option>';
 
-  for (let output of midiAccess.outputs.values()) {
-    const option = document.createElement('option');
-    option.value = output.id;
-    option.textContent = output.name;
-    if (output.id === currentOutputId) option.selected = true;
-    outputSelect.appendChild(option);
-  }
+      for (let output of midiAccess.outputs.values()) {
+        const option = document.createElement('option');
+        option.value = output.id;
+        option.textContent = output.name;
+        if (output.id === currentOutputId) option.selected = true;
+        outputSelect.appendChild(option);
+      }
 
-  for (let input of midiAccess.inputs.values()) {
-    const option = document.createElement('option');
-    option.value = input.id;
-    option.textContent = input.name;
-    if (input.id === currentInputId) option.selected = true;
-    inputSelect.appendChild(option);
-  }
+      for (let input of midiAccess.inputs.values()) {
+        const option = document.createElement('option');
+        option.value = input.id;
+        option.textContent = input.name;
+        if (input.id === currentInputId) option.selected = true;
+        inputSelect.appendChild(option);
+      }
 
-  // Restaurar objetos según selección, por si los <select> fueron reconstruidos
-  if (currentOutputId && midiAccess.outputs.has(currentOutputId)) {
-    selectedOutput = midiAccess.outputs.get(currentOutputId);
-  }
+      // Restaurar objetos según selección, por si los <select> fueron reconstruidos
+      if (currentOutputId && midiAccess.outputs.has(currentOutputId)) {
+        selectedOutput = midiAccess.outputs.get(currentOutputId);
+      }
 
-  if (currentInputId && midiAccess.inputs.has(currentInputId)) {
-    if (midiInputListener && selectedInput) {
-      selectedInput.removeEventListener('midimessage', midiInputListener);
+      if (currentInputId && midiAccess.inputs.has(currentInputId)) {
+        if (midiInputListener && selectedInput) {
+          selectedInput.removeEventListener('midimessage', midiInputListener);
+        }
+        selectedInput = midiAccess.inputs.get(currentInputId);
+        midiInputListener = handleMIDIMessage;
+        selectedInput.addEventListener('midimessage', midiInputListener);
+      }
+
+      checkReadyState();
     }
-    selectedInput = midiAccess.inputs.get(currentInputId);
-    midiInputListener = handleMIDIMessage;
-    selectedInput.addEventListener('midimessage', midiInputListener);
-  }
-
-  checkReadyState();
-}
 
     function checkReadyState() {
       startButton.disabled = !(selectedInput && selectedOutput);
@@ -322,7 +321,7 @@
 
       notesRemainingSpan.textContent = notesRemaining;
       errorCountSpan.textContent = errorCount;
-      timeDisplay.textContent = '0.00';
+      timeDisplay.textContent = '0.000';
       feedbackDiv.textContent = '';
       feedbackDiv.className = 'feedback';
 
@@ -338,7 +337,7 @@
     }
 
     function playNoteOn(output, noteNumber, duration = 10000) {
-      // Canal 0, velocidad 0x40 (64 decimal) → más suave que 0x7f
+      // Canal 0, velocidad 0x60 (96 decimal) → más suave que 0x7f
       output.send([0x90, noteNumber, 0x60]);
       setTimeout(() => {
         output.send([0x80, noteNumber, 0x00]);
@@ -362,13 +361,13 @@
 
       // Iniciar cronómetro
       noteStartTime = performance.now();
-      timeDisplay.textContent = '0.00';
+      timeDisplay.textContent = '0.000';
       awaitingAnswer = true;
 
       // Actualizar tiempo cada 100 ms
       timerInterval = setInterval(() => {
         const elapsed = (performance.now() - noteStartTime) / 1000;
-        timeDisplay.textContent = elapsed.toFixed(2);
+        timeDisplay.textContent = elapsed.toFixed(3);
       }, 100);
     }
 
@@ -421,10 +420,12 @@
       // Calcular tiempo medio y puntuación final
       const avgTime = sumTime / MAX_NOTES;
       const finalScore = Math.max(0, (100 - errorCount - avgTime));
-      const finalScoreRounded = Number(finalScore.toFixed(2));
+      const finalScoreRounded = Number(finalScore.toFixed(3));
 
-      feedbackDiv.textContent = `Juego terminado. Tu puntuación: ${finalScoreRounded}`;
-      feedbackDiv.className = 'feedback';
+      feedbackDiv.innerHTML = `
+        Juego terminado. Tu puntuación: <strong>${finalScoreRounded}</strong><br>
+        <small>Fórmula: 100 - errores - media de tiempo (en segundos)</small>
+      `;
 
       // 3) Guardar en Firestore: solo name, errores, avgTime y score
       let docRef;
@@ -432,7 +433,7 @@
         docRef = await db.collection('scores').add({
           name: playerName,
           errors: errorCount,
-          avgTime: Number(avgTime.toFixed(2)),
+          avgTime: Number(avgTime.toFixed(3)),
           score: finalScoreRounded,
           timestamp: firebase.firestore.FieldValue.serverTimestamp()
         });
@@ -448,7 +449,6 @@
       try {
         const querySnap = await db.collection('scores')
           .orderBy('score', 'desc')
-          // —> Hemos eliminado `orderBy('timestamp', 'asc')` para que no requiera índice compuesto
           .get();
         allDocs = querySnap.docs.map(doc => {
           return {
@@ -494,7 +494,7 @@
         tr.innerHTML = `
           <td>${globalRank}</td>
           <td>${entry.name}</td>
-          <td>${entry.score.toFixed(2)}</td>
+          <td>${entry.score.toFixed(3)}</td>
         `;
         leaderboardBody.appendChild(tr);
       });
