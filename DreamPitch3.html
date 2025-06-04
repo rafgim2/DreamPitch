@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DreamPitch</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      display: flex;
+      justify-content: center;
+      background-color: #f89e96;
+    }
+    .frame {
+      border: 4px solid #800000; /* granate */
+      border-radius: 30px;
+      padding: 20px;
+      max-width: 600px;
+      width: 100%;
+      box-sizing: border-box;
+      background-color: #fff;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 5px;
+    }
+    .byline {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    .byline a {
+      text-decoration: none;
+      color: #000;
+      font-size: 0.9rem;
+    }
+    .controls, .status, .feedback {
+      margin-top: 20px;
+      text-align: center;
+    }
+    select, button {
+      font-size: 1rem;
+      padding: 5px 10px;
+      margin: 0 10px;
+margin-top: 20px;
+    }
+    .status span {
+      display: inline-block;
+      margin: 0 10px;
+      font-size: 1.2rem;
+    }
+    .feedback {
+      font-size: 1.5rem;
+      font-weight: bold;
+      height: 2em;
+      margin-top: 15px;
+    }
+    .feedback.correcto {
+      color: green;
+    }
+    .feedback.error {
+      color: red;
+    }
+    /* Estilos para la tabla de clasificación */
+    #leaderboard-container {
+      margin-top: 30px;
+      text-align: center;
+    }
+    #leaderboard-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #leaderboard-table th, 
+    #leaderboard-table td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: center;
+    }
+    #leaderboard-table th {
+      background-color: #800000;
+      color: #fff;
+      position: sticky;
+      top: 0;
+    }
+    #leaderboard-scroll {
+      max-height: 300px; /* altura fija para scroll */
+      overflow-y: auto;
+      margin-top: 10px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }
+    .current-player {
+      background-color: #ffe58f; /* un amarillo suave para destacar */
+    }
+  </style>
+  <!-- Firebase SDK: App + Firestore (versión compat para web) -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-firestore-compat.js"></script>
+</head>
+<body>
+  <div class="frame">
+    <h1>DreamPitch</h1>
+    <div class="byline">
+      <a href="https://www.youtube.com/@rafgim" target="_blank">© By Rafael Gimeno</a>
+    </div>
+
+    <div class="controls">
+      <label for="midi-output">Salida MIDI:</label>
+      <select id="midi-output">
+        <option value="">(ninguna)</option>
+      </select>
+
+      <label for="midi-input">Entrada MIDI:</label>
+      <select id="midi-input">
+        <option value="">(ninguna)</option>
+      </select>
+
+      <button id="start-button" disabled>Empezar</button>
+    </div>
+
+    <div class="status">
+      <span>Notas restantes: <span id="notes-remaining">10</span></span>
+      <span>Errores: <span id="error-count">0</span></span>
+      <span>Tiempo: <span id="time-display">0.00</span> s</span>
+    </div>
+
+    <div class="feedback" id="feedback"></div>
+
+    <!-- Contenedor para la tabla de clasificación -->
+    <div id="leaderboard-container" style="display: none;">
+      <h2>Tabla de Clasificación</h2>
+      <div id="leaderboard-scroll">
+        <table id="leaderboard-table">
+          <thead>
+            <tr>
+              <th>Pos</th>
+              <th>Jugador</th>
+              <th>Puntuación</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboard-body">
+            <!-- Se llenará dinámicamente -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Audios de acierto y error -->
+  <audio id="audio-correct" src="https://raw.githubusercontent.com/rafgim2/ARCapitals/main/acierto.wav"></audio>
+  <audio id="audio-error" src="https://raw.githubusercontent.com/rafgim2/ARCapitals/main/error.wav"></audio>
+
+  <script>
+    /*********************************************
+     * 1) Configuración de Firebase (Firestore)  *
+     *********************************************/
+    // Ya con los valores que me proporcionaste en la imagen:
+    const firebaseConfig = {
+      apiKey: "AIzaSyD5EAMg-0p54f8bPq8SVdZ_ePg5Xso3cmg",
+      authDomain: "arm1-acbba.firebaseapp.com",
+      projectId: "arm1-acbba",
+      storageBucket: "arm1-acbba.firebasestorage.app",
+      messagingSenderId: "408825932019",
+      appId: "1:408825932019:web:10f2079b590b4c9ca3af86",
+      measurementId: "G-S78TM6PVRL"
+    };
+
+    // Inicializa Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    // Nombre del jugador (se pedirá al pulsar “Empezar”)
+    let playerName = "";
+
+    /******************************
+     * 2) Variables del juego MIDI *
+     ******************************/
+    const LOWEST_NOTE = 21;
+    const HIGHEST_NOTE = 108;
+    const MAX_NOTES = 10;
+
+    let midiAccess = null;
+    let selectedInput = null;
+    let selectedOutput = null;
+    let midiInputListener = null;
+
+    let currentTargetNote = null;
+    let timerInterval = null;
+    let noteStartTime = null;
+    let awaitingAnswer = false;
+
+    let notesRemaining = MAX_NOTES;
+    let errorCount = 0;
+    let sumTime = 0;
+
+    // Referencias a elementos del DOM
+    const outputSelect       = document.getElementById('midi-output');
+    const inputSelect        = document.getElementById('midi-input');
+    const startButton        = document.getElementById('start-button');
+    const notesRemainingSpan = document.getElementById('notes-remaining');
+    const errorCountSpan     = document.getElementById('error-count');
+    const timeDisplay        = document.getElementById('time-display');
+    const feedbackDiv        = document.getElementById('feedback');
+
+    const audioCorrect = document.getElementById('audio-correct');
+    const audioError   = document.getElementById('audio-error');
+
+    const leaderboardContainer = document.getElementById('leaderboard-container');
+    const leaderboardBody      = document.getElementById('leaderboard-body');
+
+    // Solicitar acceso a Web MIDI API
+    if (navigator.requestMIDIAccess) {
+      navigator.requestMIDIAccess()
+        .then(onMIDISuccess, onMIDIFailure);
+    } else {
+      alert('Este navegador no soporta Web MIDI API.');
+    }
+
+    function onMIDISuccess(access) {
+      midiAccess = access;
+      populateMIDIDevices();
+      midiAccess.onstatechange = populateMIDIDevices;
+    }
+
+    function onMIDIFailure() {
+      alert('No se pudo acceder a los dispositivos MIDI.');
+    }
+
+    function populateMIDIDevices() {
+      // Limpiar selects
+      outputSelect.innerHTML = '<option value="">(ninguna)</option>';
+      inputSelect.innerHTML  = '<option value="">(ninguna)</option>';
+
+      // Rellenar salidas
+      for (let output of midiAccess.outputs.values()) {
+        const option = document.createElement('option');
+        option.value = output.id;
+        option.textContent = output.name;
+        outputSelect.appendChild(option);
+      }
+
+      // Rellenar entradas
+      for (let input of midiAccess.inputs.values()) {
+        const option = document.createElement('option');
+        option.value = input.id;
+        option.textContent = input.name;
+        inputSelect.appendChild(option);
+      }
+
+      checkReadyState();
+    }
+
+    function checkReadyState() {
+      startButton.disabled = !(selectedInput && selectedOutput);
+    }
+
+    outputSelect.addEventListener('change', () => {
+      const id = outputSelect.value;
+      if (midiAccess && id) {
+        selectedOutput = midiAccess.outputs.get(id);
+      } else {
+        selectedOutput = null;
+      }
+      checkReadyState();
+    });
+
+    inputSelect.addEventListener('change', () => {
+      const id = inputSelect.value;
+
+      // Si había un listener anterior, eliminarlo
+      if (midiInputListener && selectedInput) {
+        selectedInput.removeEventListener('midimessage', midiInputListener);
+        midiInputListener = null;
+      }
+
+      if (midiAccess && id) {
+        selectedInput = midiAccess.inputs.get(id);
+        midiInputListener = handleMIDIMessage;
+        selectedInput.addEventListener('midimessage', midiInputListener);
+      } else {
+        selectedInput = null;
+      }
+      checkReadyState();
+    });
+
+    startButton.addEventListener('click', () => {
+      // 1) Pedir nombre del jugador
+      playerName = prompt("Ingrese su nombre:");
+      if (!playerName || playerName.trim().length === 0) {
+        alert("Debes ingresar un nombre para jugar.");
+        return;
+      }
+      playerName = playerName.trim();
+
+      // 2) Iniciar juego
+      resetGame();
+      playNextNote();
+      startButton.disabled = true; // evitar reinicio durante partida
+    });
+
+    function resetGame() {
+      notesRemaining = MAX_NOTES;
+      errorCount = 0;
+      sumTime = 0;
+      awaitingAnswer = false;
+
+      notesRemainingSpan.textContent = notesRemaining;
+      errorCountSpan.textContent = errorCount;
+      timeDisplay.textContent = '0.00';
+      feedbackDiv.textContent = '';
+      feedbackDiv.className = 'feedback';
+
+      clearInterval(timerInterval);
+
+      // Ocultar leaderboard (en caso de partidas previas)
+      leaderboardContainer.style.display = 'none';
+      leaderboardBody.innerHTML = '';
+    }
+
+    function getRandomNote() {
+      return Math.floor(Math.random() * (HIGHEST_NOTE - LOWEST_NOTE + 1)) + LOWEST_NOTE;
+    }
+
+    function playNoteOn(output, noteNumber, duration = 10000) {
+      // Canal 0, velocidad 127
+      output.send([0x90, noteNumber, 0x7f]);
+      setTimeout(() => {
+        output.send([0x80, noteNumber, 0x00]);
+      }, duration);
+    }
+
+    function playNextNote() {
+      if (!selectedOutput) return;
+
+      if (notesRemaining <= 0) {
+        // Ya no quedan notas: terminar
+        endGame();
+        return;
+      }
+
+      // Elegir nota aleatoria
+      currentTargetNote = getRandomNote();
+
+      // Tocar la nota durante 10 segundos
+      playNoteOn(selectedOutput, currentTargetNote, 10000);
+
+      // Iniciar cronómetro
+      noteStartTime = performance.now();
+      timeDisplay.textContent = '0.00';
+      awaitingAnswer = true;
+
+      // Actualizar tiempo cada 100 ms
+      timerInterval = setInterval(() => {
+        const elapsed = (performance.now() - noteStartTime) / 1000;
+        timeDisplay.textContent = elapsed.toFixed(2);
+      }, 100);
+    }
+
+    function handleMIDIMessage(event) {
+      if (!awaitingAnswer) return;
+
+      const [status, noteNumber, velocity] = event.data;
+      const messageType = status & 0xf0;
+
+      // Solo Note On con velocity > 0
+      if (messageType === 0x90 && velocity > 0) {
+        if (noteNumber === currentTargetNote) {
+          // Acierto
+          awaitingAnswer = false;
+          clearInterval(timerInterval);
+          const timeTaken = (performance.now() - noteStartTime) / 1000;
+          sumTime += timeTaken;
+          notesRemaining--;
+          notesRemainingSpan.textContent = notesRemaining;
+          feedbackDiv.textContent = 'Correcto';
+          feedbackDiv.className = 'feedback correcto';
+          audioCorrect.play();
+
+          if (notesRemaining > 0) {
+            // Reproducir próxima nota tras 2 segundos
+            setTimeout(() => {
+              feedbackDiv.textContent = '';
+              feedbackDiv.className = 'feedback';
+              playNextNote();
+            }, 2000);
+          } else {
+            // No quedan notas: terminar tras 1 segundo
+            setTimeout(endGame, 1000);
+          }
+        } else {
+          // Error
+          errorCount++;
+          errorCountSpan.textContent = errorCount;
+          feedbackDiv.textContent = 'Error';
+          feedbackDiv.className = 'feedback error';
+          audioError.play();
+        }
+      }
+    }
+
+    async function endGame() {
+      clearInterval(timerInterval);
+      awaitingAnswer = false;
+
+      // Calcular tiempo medio y puntuación final
+      const avgTime = sumTime / MAX_NOTES;
+      const finalScore = Math.max(0, (100 - errorCount - avgTime));
+      const finalScoreRounded = Number(finalScore.toFixed(2));
+
+      feedbackDiv.textContent = `Juego terminado. Tu puntuación: ${finalScoreRounded}`;
+      feedbackDiv.className = 'feedback';
+
+      // 3) Guardar en Firestore: solo guardamos name, errores, avgTime y score
+      let docRef;
+      try {
+        docRef = await db.collection('scores').add({
+          name: playerName,
+          errors: errorCount,
+          avgTime: Number(avgTime.toFixed(2)),
+          score: finalScoreRounded,
+          timestamp: firebase.firestore.FieldValue.serverTimestamp()
+        });
+      } catch (err) {
+        console.error("Error guardando en Firestore:", err);
+        alert("Hubo un error guardando tu puntuación. Revisa la consola.");
+        startButton.disabled = false;
+        return;
+      }
+
+      // 4) Leer TODOS los documentos ordenados por score desc
+      let allDocs;
+      try {
+        const querySnap = await db.collection('scores')
+          .orderBy('score', 'desc')
+          .orderBy('timestamp', 'asc') // para desempates
+          .get();
+        allDocs = querySnap.docs.map(doc => {
+          return {
+            id: doc.id,
+            name: doc.data().name,
+            score: doc.data().score
+          };
+        });
+      } catch (err) {
+        console.error("Error leyendo leaderboard:", err);
+        alert("Hubo un error cargando la clasificación. Revisa la consola.");
+        startButton.disabled = false;
+        return;
+      }
+
+      // 5) Encontrar índice del jugador actual
+      const idxCurrent = allDocs.findIndex(d => d.id === docRef.id);
+
+      // Construir un rango centrado en idxCurrent (aprox. 10 filas)
+      const VENTANA = 4; // 4 arriba + current + 5 abajo ≈ 10 filas
+      let startIdx = Math.max(0, idxCurrent - VENTANA);
+      let endIdx = Math.min(allDocs.length, idxCurrent + VENTANA + 1);
+
+      // Ajustar si cerca del final o del principio
+      if (endIdx - startIdx < (2 * VENTANA + 1)) {
+        if (startIdx === 0) {
+          endIdx = Math.min(allDocs.length, (2 * VENTANA + 1));
+        } else if (endIdx === allDocs.length) {
+          startIdx = Math.max(0, allDocs.length - (2 * VENTANA + 1));
+        }
+      }
+
+      const sliceDocs = allDocs.slice(startIdx, endIdx);
+
+      // 6) Mostrar la tabla (solo Pos, Jugador y Puntuación)
+      leaderboardBody.innerHTML = "";
+      sliceDocs.forEach((entry, i) => {
+        const globalRank = startIdx + i + 1; // posición global (1-based)
+        const tr = document.createElement('tr');
+        if (entry.id === docRef.id) {
+          tr.classList.add('current-player');
+        }
+        tr.innerHTML = `
+          <td>${globalRank}</td>
+          <td>${entry.name}</td>
+          <td>${entry.score.toFixed(2)}</td>
+        `;
+        leaderboardBody.appendChild(tr);
+      });
+      leaderboardContainer.style.display = 'block';
+
+      // 7) Permitir volver a jugar
+      startButton.disabled = false;
+    }
+  </script>
+</body>
+</html>
