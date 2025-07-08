@@ -21,77 +21,34 @@
       box-sizing: border-box;
       background-color: #fff;
     }
-    h1 {
-      text-align: center;
-      margin-bottom: 5px;
-    }
-    .byline {
-      text-align: center;
-      margin-bottom: 20px;
-    }
-    .byline a {
-      text-decoration: none;
-      color: #000;
-      font-size: 0.9rem;
-    }
-    .controls, .status, .feedback {
-      margin-top: 20px;
-      text-align: center;
-    }
-    select, button {
-      font-size: 1rem;
-      padding: 5px 10px;
-      margin: 0 10px;
-      margin-top: 20px;
-    }
-    .status span {
-      display: inline-block;
-      margin: 0 10px;
-      font-size: 1.2rem;
-    }
+    h1 { text-align: center; margin-bottom: 5px; }
+    .byline { text-align: center; margin-bottom: 20px; }
+    .byline a { text-decoration: none; color: #000; font-size: 0.9rem; }
+    .controls, .status, .feedback { margin-top: 20px; text-align: center; }
+    select, button { font-size: 1rem; padding: 5px 10px; margin: 0 10px; margin-top: 20px; }
+    .status span { display: inline-block; margin: 0 10px; font-size: 1.2rem; }
     .feedback {
       font-size: 1.5rem;
       font-weight: bold;
       height: 3em;
       margin-top: 15px;
     }
-    .feedback.correcto {
-      color: green;
-    }
-    .feedback.error {
-      color: red;
-    }
+    .feedback.correcto { color: green; }
+    .feedback.error { color: red; }
     /* Estilos para la tabla de clasificación */
-    #leaderboard-container {
-      margin-top: 30px;
-      text-align: center;
-    }
-    #leaderboard-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
+    #leaderboard-container { margin-top: 30px; text-align: center; }
+    #leaderboard-table { width: 100%; border-collapse: collapse; }
     #leaderboard-table th,
-    #leaderboard-table td {
-      border: 1px solid #ccc;
-      padding: 8px;
-      text-align: center;
-    }
-    #leaderboard-table th {
-      background-color: #800000;
-      color: #fff;
-      position: sticky;
-      top: 0;
-    }
+    #leaderboard-table td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    #leaderboard-table th { background-color: #800000; color: #fff; position: sticky; top: 0; }
     #leaderboard-scroll {
-      max-height: 300px; /* altura fija para scroll */
+      max-height: 300px;
       overflow-y: auto;
       margin-top: 10px;
       border: 1px solid #ccc;
       border-radius: 8px;
     }
-    .current-player {
-      background-color: #ffe58f; /* un amarillo suave para destacar */
-    }
+    .current-player { background-color: #ffe58f; }
   </style>
   <!-- Firebase SDK: App + Firestore (versión compat para web) -->
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
@@ -116,6 +73,7 @@
       </select>
 
       <button id="start-button" disabled>Empezar</button>
+      <button id="repeat-button" disabled>Repetir sonido</button>
     </div>
 
     <div class="status">
@@ -191,11 +149,13 @@
     let notesRemaining = MAX_NOTES;
     let errorCount = 0;
     let sumTime = 0;
+    let attemptsForNote = 0; // para contar intentos en cada nota
 
     // Referencias a elementos del DOM
     const outputSelect       = document.getElementById('midi-output');
     const inputSelect        = document.getElementById('midi-input');
     const startButton        = document.getElementById('start-button');
+    const repeatButton       = document.getElementById('repeat-button');
     const notesRemainingSpan = document.getElementById('notes-remaining');
     const errorCountSpan     = document.getElementById('error-count');
     const timeDisplay        = document.getElementById('time-display');
@@ -226,38 +186,34 @@
     }
 
     function populateMIDIDevices() {
-      const currentOutputId = outputSelect.value;
-      const currentInputId = inputSelect.value;
+      const prevOut = outputSelect.value;
+      const prevIn  = inputSelect.value;
 
       outputSelect.innerHTML = '<option value="">(ninguna)</option>';
       inputSelect.innerHTML  = '<option value="">(ninguna)</option>';
 
       for (let output of midiAccess.outputs.values()) {
-        const option = document.createElement('option');
-        option.value = output.id;
-        option.textContent = output.name;
-        if (output.id === currentOutputId) option.selected = true;
-        outputSelect.appendChild(option);
+        const opt = document.createElement('option');
+        opt.value = output.id;
+        opt.textContent = output.name;
+        if (output.id === prevOut) opt.selected = true;
+        outputSelect.appendChild(opt);
       }
-
       for (let input of midiAccess.inputs.values()) {
-        const option = document.createElement('option');
-        option.value = input.id;
-        option.textContent = input.name;
-        if (input.id === currentInputId) option.selected = true;
-        inputSelect.appendChild(option);
+        const opt = document.createElement('option');
+        opt.value = input.id;
+        opt.textContent = input.name;
+        if (input.id === prevIn) opt.selected = true;
+        inputSelect.appendChild(opt);
       }
 
-      // Restaurar objetos según selección, por si los <select> fueron reconstruidos
-      if (currentOutputId && midiAccess.outputs.has(currentOutputId)) {
-        selectedOutput = midiAccess.outputs.get(currentOutputId);
+      // Restaurar listeners
+      if (midiInputListener && selectedInput) {
+        selectedInput.removeEventListener('midimessage', midiInputListener);
       }
-
-      if (currentInputId && midiAccess.inputs.has(currentInputId)) {
-        if (midiInputListener && selectedInput) {
-          selectedInput.removeEventListener('midimessage', midiInputListener);
-        }
-        selectedInput = midiAccess.inputs.get(currentInputId);
+      selectedOutput = midiAccess.outputs.get(outputSelect.value) || null;
+      selectedInput  = midiAccess.inputs.get(inputSelect.value)   || null;
+      if (selectedInput) {
         midiInputListener = handleMIDIMessage;
         selectedInput.addEventListener('midimessage', midiInputListener);
       }
@@ -266,47 +222,33 @@
     }
 
     function checkReadyState() {
-      startButton.disabled = !(selectedInput && selectedOutput);
+      const ready = selectedInput && selectedOutput;
+      startButton.disabled  = !ready;
+      repeatButton.disabled = !ready || !awaitingAnswer;
     }
 
     outputSelect.addEventListener('change', () => {
-      const id = outputSelect.value;
-      if (midiAccess && id) {
-        selectedOutput = midiAccess.outputs.get(id);
-      } else {
-        selectedOutput = null;
-      }
+      selectedOutput = midiAccess.outputs.get(outputSelect.value) || null;
       checkReadyState();
     });
 
     inputSelect.addEventListener('change', () => {
-      const id = inputSelect.value;
-
-      // Si había un listener anterior, eliminarlo
       if (midiInputListener && selectedInput) {
         selectedInput.removeEventListener('midimessage', midiInputListener);
-        midiInputListener = null;
       }
-
-      if (midiAccess && id) {
-        selectedInput = midiAccess.inputs.get(id);
+      selectedInput = midiAccess.inputs.get(inputSelect.value) || null;
+      if (selectedInput) {
         midiInputListener = handleMIDIMessage;
         selectedInput.addEventListener('midimessage', midiInputListener);
-      } else {
-        selectedInput = null;
       }
       checkReadyState();
     });
 
     startButton.addEventListener('click', () => {
-      // 1) Pedir nombre del jugador
       let nombreOk = false;
       while (!nombreOk) {
         playerName = prompt("Ingrese su nombre (máx. 10 caracteres):");
-        if (playerName === null) {
-          // El usuario canceló el prompt
-          return;
-        }
+        if (playerName === null) return;
         playerName = playerName.trim();
         if (playerName.length === 0) {
           alert("Debes ingresar un nombre para jugar.");
@@ -319,29 +261,34 @@
         }
       }
 
-      // 2) Iniciar juego
       resetGame();
       playNextNote();
-      startButton.disabled = true; // evitar reinicio durante partida
+      startButton.disabled = true;
+    });
+
+    repeatButton.addEventListener('click', () => {
+      if (currentTargetNote !== null && selectedOutput) {
+        playNoteOn(selectedOutput, currentTargetNote, 10000);
+      }
     });
 
     function resetGame() {
       notesRemaining = MAX_NOTES;
-      errorCount = 0;
-      sumTime = 0;
+      errorCount     = 0;
+      sumTime        = 0;
       awaitingAnswer = false;
 
       notesRemainingSpan.textContent = notesRemaining;
-      errorCountSpan.textContent = errorCount;
-      timeDisplay.textContent = '0.000';
-      feedbackDiv.textContent = '';
-      feedbackDiv.className = 'feedback';
+      errorCountSpan.textContent     = errorCount;
+      timeDisplay.textContent        = '0.000';
+      feedbackDiv.textContent        = '';
+      feedbackDiv.className          = 'feedback';
 
       clearInterval(timerInterval);
-
-      // Ocultar leaderboard (en caso de partidas previas)
       leaderboardContainer.style.display = 'none';
-      leaderboardBody.innerHTML = '';
+      leaderboardBody.innerHTML          = '';
+
+      repeatButton.disabled = true;
     }
 
     function getRandomNote() {
@@ -349,7 +296,6 @@
     }
 
     function playNoteOn(output, noteNumber, duration = 10000) {
-      // Canal 0, velocidad 0x60 (96 decimal) → más suave que 0x7f
       output.send([0x90, noteNumber, 0x60]);
       setTimeout(() => {
         output.send([0x80, noteNumber, 0x00]);
@@ -358,25 +304,17 @@
 
     function playNextNote() {
       if (!selectedOutput) return;
+      if (notesRemaining <= 0) { endGame(); return; }
 
-      if (notesRemaining <= 0) {
-        // Ya no quedan notas: terminar
-        endGame();
-        return;
-      }
-
-      // Elegir nota aleatoria
       currentTargetNote = getRandomNote();
-
-      // Tocar la nota durante 10 segundos
+      attemptsForNote   = 0;
       playNoteOn(selectedOutput, currentTargetNote, 10000);
 
-      // Iniciar cronómetro
       noteStartTime = performance.now();
       timeDisplay.textContent = '0.000';
       awaitingAnswer = true;
+      repeatButton.disabled = false;
 
-      // Actualizar tiempo cada 100 ms
       timerInterval = setInterval(() => {
         const elapsed = (performance.now() - noteStartTime) / 1000;
         timeDisplay.textContent = elapsed.toFixed(3);
@@ -385,11 +323,8 @@
 
     function handleMIDIMessage(event) {
       if (!awaitingAnswer) return;
-
       const [status, noteNumber, velocity] = event.data;
       const messageType = status & 0xf0;
-
-      // Solo Note On con velocity > 0
       if (messageType === 0x90 && velocity > 0) {
         if (noteNumber === currentTargetNote) {
           // Acierto
@@ -403,23 +338,27 @@
           feedbackDiv.className = 'feedback correcto';
           audioCorrect.play();
 
+          repeatButton.disabled = true;
           if (notesRemaining > 0) {
-            // Reproducir próxima nota tras 2 segundos
             setTimeout(() => {
               feedbackDiv.textContent = '';
               feedbackDiv.className = 'feedback';
               playNextNote();
             }, 2000);
           } else {
-            // No quedan notas: terminar tras 1 segundo
             setTimeout(endGame, 1000);
           }
         } else {
-          // Error
+          // Error y pista
           errorCount++;
           errorCountSpan.textContent = errorCount;
-          feedbackDiv.textContent = 'Error';
+          attemptsForNote++;
           feedbackDiv.className = 'feedback error';
+          if (attemptsForNote === 1) {
+            feedbackDiv.textContent = (noteNumber < currentTargetNote) ? '↑' : '↓';
+          } else {
+            feedbackDiv.textContent = 'Error';
+          }
           audioError.play();
         }
       }
@@ -429,7 +368,6 @@
       clearInterval(timerInterval);
       awaitingAnswer = false;
 
-      // Calcular tiempo medio y puntuación final
       const avgTime = sumTime / MAX_NOTES;
       const finalScore = Math.max(0, (100 - errorCount - avgTime));
       const finalScoreRounded = Number(finalScore.toFixed(3));
@@ -438,16 +376,14 @@
         Juego terminado. Tu puntuación: <strong>${finalScoreRounded}</strong><br>
       `;
 
-      // 3) Guardar en Firestore: machacar si existe el nombre
       try {
-        // 3.1) Buscar si ya existe un documento con este nombre
+        // Guardar o actualizar puntuación en Firestore
         const querySnap = await db.collection('scores')
           .where('name', '==', playerName)
           .get();
 
         let docRef;
         if (!querySnap.empty) {
-          // Si ya hay un documento, tomar el primero y actualizarlo
           const existingDoc = querySnap.docs[0];
           docRef = existingDoc.ref;
           await docRef.update({
@@ -457,7 +393,6 @@
             timestamp: firebase.firestore.FieldValue.serverTimestamp()
           });
         } else {
-          // Si no existe, crear uno nuevo
           const addedDoc = await db.collection('scores').add({
             name: playerName,
             errors: errorCount,
@@ -468,45 +403,35 @@
           docRef = addedDoc;
         }
 
-        // 4) Leer TODOS los documentos ordenados SOLO POR score desc
+        // Recuperar todas las puntuaciones ordenadas
         const allSnap = await db.collection('scores')
           .orderBy('score', 'desc')
           .get();
-        const allDocs = allSnap.docs.map(doc => {
-          return {
-            id: doc.id,
-            name: doc.data().name,
-            score: doc.data().score
-          };
-        });
+        const allDocs = allSnap.docs.map(doc => ({
+          id: doc.id,
+          name: doc.data().name,
+          score: doc.data().score
+        }));
 
-        // 5) Encontrar índice del jugador actual
         const idxCurrent = allDocs.findIndex(d => d.id === docRef.id);
-
-        // Construir un rango centrado en idxCurrent (aprox. 10 filas)
-        const VENTANA = 4; // 4 arriba + current + 5 abajo ≈ 10 filas
+        const VENTANA = 4;
         let startIdx = Math.max(0, idxCurrent - VENTANA);
-        let endIdx = Math.min(allDocs.length, idxCurrent + VENTANA + 1);
+        let endIdx   = Math.min(allDocs.length, idxCurrent + VENTANA + 1);
 
-        // Ajustar si cerca del final o del principio
         if (endIdx - startIdx < (2 * VENTANA + 1)) {
           if (startIdx === 0) {
-            endIdx = Math.min(allDocs.length, (2 * VENTANA + 1));
+            endIdx = Math.min(allDocs.length, 2 * VENTANA + 1);
           } else if (endIdx === allDocs.length) {
             startIdx = Math.max(0, allDocs.length - (2 * VENTANA + 1));
           }
         }
 
         const sliceDocs = allDocs.slice(startIdx, endIdx);
-
-        // 6) Mostrar la tabla (solo Pos, Jugador y Puntuación)
-        leaderboardBody.innerHTML = "";
+        leaderboardBody.innerHTML = '';
         sliceDocs.forEach((entry, i) => {
-          const globalRank = startIdx + i + 1; // posición global (1-based)
+          const globalRank = startIdx + i + 1;
           const tr = document.createElement('tr');
-          if (entry.id === docRef.id) {
-            tr.classList.add('current-player');
-          }
+          if (entry.id === docRef.id) tr.classList.add('current-player');
           tr.innerHTML = `
             <td>${globalRank}</td>
             <td>${entry.name}</td>
@@ -515,10 +440,7 @@
           leaderboardBody.appendChild(tr);
         });
         leaderboardContainer.style.display = 'block';
-
-        // 7) Permitir volver a jugar
         startButton.disabled = false;
-
       } catch (err) {
         console.error("Error guardando o cargando la clasificación:", err);
         alert("Hubo un error procesando tu puntuación. Revisa la consola.");
