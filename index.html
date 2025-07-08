@@ -149,7 +149,6 @@
     let notesRemaining = MAX_NOTES;
     let errorCount = 0;
     let sumTime = 0;
-    let attemptsForNote = 0; // para contar intentos en cada nota
 
     // Referencias a elementos del DOM
     const outputSelect       = document.getElementById('midi-output');
@@ -307,7 +306,6 @@
       if (notesRemaining <= 0) { endGame(); return; }
 
       currentTargetNote = getRandomNote();
-      attemptsForNote   = 0;
       playNoteOn(selectedOutput, currentTargetNote, 10000);
 
       noteStartTime = performance.now();
@@ -324,8 +322,7 @@
     function handleMIDIMessage(event) {
       if (!awaitingAnswer) return;
       const [status, noteNumber, velocity] = event.data;
-      const messageType = status & 0xf0;
-      if (messageType === 0x90 && velocity > 0) {
+      if ((status & 0xf0) === 0x90 && velocity > 0) {
         if (noteNumber === currentTargetNote) {
           // Acierto
           awaitingAnswer = false;
@@ -349,15 +346,16 @@
             setTimeout(endGame, 1000);
           }
         } else {
-          // Error y pista
+          // Error + pista siempre
           errorCount++;
           errorCountSpan.textContent = errorCount;
-          attemptsForNote++;
           feedbackDiv.className = 'feedback error';
-          if (attemptsForNote === 1) {
-            feedbackDiv.textContent = (noteNumber < currentTargetNote) ? '↑' : '↓';
+
+          // Flecha grande + texto
+          if (noteNumber < currentTargetNote) {
+            feedbackDiv.innerHTML = '<span style="font-size:3rem; vertical-align:middle;">↑</span> Más aguda';
           } else {
-            feedbackDiv.textContent = 'Error';
+            feedbackDiv.innerHTML = '<span style="font-size:3rem; vertical-align:middle;">↓</span> Más grave';
           }
           audioError.play();
         }
